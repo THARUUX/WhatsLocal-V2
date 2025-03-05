@@ -1,4 +1,4 @@
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+//process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 const {
 	makeWASocket,
 	fetchLatestBaileysVersion,
@@ -11,10 +11,24 @@ const {
 const fs = require("fs");
 const Pino = require("pino");
 const chalk = require("chalk");
-const moment = require("moment-timezone");
-moment.tz.setDefault("Asia/Jakarta").locale("id");
+const momenttz = require("moment-timezone");
+momenttz.tz.setDefault("Asia/Jakarta").locale("id");
 const { Messages } = require("./lib/messages.js");
-const donet = "https://saweria.co/sansekai";
+const me = "https://www.tharuux.github.io";
+const figlet = require("figlet");
+const crypto = require("crypto");
+
+const qrcode = require('qrcode');
+const path = require('path');
+const moment = require('moment');
+const { startServer, sendQRUpdate, sendConnectionUpdate } = require("./server");
+
+const qrFolderPath = path.join(__dirname, 'QR');
+if (!fs.existsSync(qrFolderPath)) {
+    fs.mkdirSync(qrFolderPath);
+}
+
+let latestQRFile = null;
 
 // Baileys
 const Logger = {
@@ -38,8 +52,52 @@ const color = (text, color) => {
   return !color ? chalk.green(text) : chalk.keyword(color)(text);
 };
 
+// Save ne QR
+const generateQRCode = (qr) => {
+    if (!qr) return;
+
+    console.log("New QR Code Generated");
+
+    const timestamp = moment().format("YYYYMMDD_HHmmss");
+    latestQRFile = `QR_${timestamp}.png`; // Save latest filename
+    const qrPath = path.join(qrFolderPath, latestQRFile);
+
+    qrcode.toFile(qrPath, qr, {
+        color: { dark: '#000', light: '#FFF' } // Black QR code, White background
+    }, (err) => {
+        if (err) {
+            console.error("Failed to save QR code:", err);
+        } else {
+            console.log(`QR Code saved as ${qrPath}`);
+            deleteOldQRFiles(); // Remove old QR files
+            sendQRUpdate(latestQRFile);
+        }
+    });
+};
+
+// Delete recent QR
+const deleteOldQRFiles = () => {
+    fs.readdir(qrFolderPath, (err, files) => {
+        if (err) {
+            console.error("Error reading QR folder:", err);
+            return;
+        }
+
+        files.forEach(file => {
+            const filePath = path.join(qrFolderPath, file);
+            if (file !== latestQRFile) { // Keep the latest file
+                fs.unlink(filePath, (err) => {
+                    if (err) console.error("Failed to delete old QR code:", err);
+                    else console.log(`Deleted old QR file: ${filePath}`);
+                });
+            }
+        });
+    });
+};
+
+
 async function connectToWhatsApp(use_pairing_code = false) {
-	const { state, saveCreds } = await useMultiFileAuthState("yusril");
+	const { state, saveCreds } = await useMultiFileAuthState("tharuux");
 
 	const { version } = await fetchLatestBaileysVersion();
 	const sock = makeWASocket({
@@ -50,10 +108,10 @@ async function connectToWhatsApp(use_pairing_code = false) {
 		version: version,
 		logger: logger,
 		printQRInTerminal: true,
-    markOnlineOnConnect: true,
+    	markOnlineOnConnect: true,
 		generateHighQualityLinkPreview: true,
 		browser: Browsers.macOS('Chrome'),
-    getMessage
+    	getMessage
 	});
 
 	store?.bind(sock.ev);
@@ -63,9 +121,14 @@ async function connectToWhatsApp(use_pairing_code = false) {
 			await saveCreds();
 		}
 		if (ev["connection.update"]) {
-			console.log("Connection update", ev["connection.update"]);
+			console.log("Connection update:", ev["connection.update"].connection);
 			const update = ev["connection.update"];
-			const { connection, lastDisconnect } = update;
+			const { connection, lastDisconnect, qr } = update;
+
+			if (qr) {
+                generateQRCode(qr);
+            }
+
 			if (connection === "close") {
 				const shouldReconnect =
 					lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -75,41 +138,33 @@ async function connectToWhatsApp(use_pairing_code = false) {
 					", reconnecting ",
 					shouldReconnect
 				);
+				sendConnectionUpdate(false); // Notify frontend
 				// reconnect if not logged out
 				if (shouldReconnect) {
 					connectToWhatsApp();
 				}
 			} else if (connection === "open") {
-        const botNumber = sock.user.id
-				console.log("opened connection");
-        console.log(color("Bot success conneted to server", "green"));
-        console.log(color("Donate for creator https://saweria.co/sansekai", "yellow"));
-        console.log(color("Type /menu to see menu"));
-        sock.sendMessage(botNumber, { text: `Bot started!\n\njangan lupa support ya bang :)\n${donet}` });
+				const botNumber = sock.user.id
+				sock.sendMessage(botNumber, { text: `*Connected With WhatsLocal*\n\n> Developed by THARUUX\n${me}` });
+				sendConnectionUpdate(true); // Notify frontend
 			}
 		}
-    // sock.ev.on("messages.upsert", async (message) => { 
-    //   console.log(message);
-    // })
-		
-		const upsert = ev["messages.upsert"];
-if (upsert) {
-	if (upsert.type !== "notify") {
-        return;
-    }
-    const message = Messages(upsert, sock);
-    if (!message || message.sender === "status@broadcast") {
-        return;
-    }
-    // msgHandler(upsert, sock, store, message);
-	require("./sansekai.js")(upsert, sock, store, message);
- }
 
-    
-    //   const message = Messages(upsert, sock);
-    //   console.log(message);
-		// }
+		const upsert = ev["messages.upsert"];
+		if (upsert) {
+			if (upsert.type !== "notify") {
+				return;
+			}
+			const message = Messages(upsert, sock);
+			if (!message || message.sender === "status@broadcast") {
+				return;
+			}
+			// msgHandler(upsert, sock, store, message);
+			require("./tharuux.js")(upsert, sock, store, message);
+		}
+
 	});
+
 	/**
 	 *
 	 * @param {import("@whiskeysockets/baileys").WAMessageKey} key
@@ -125,8 +180,10 @@ if (upsert) {
 	}
 	return sock;
 }
+
 connectToWhatsApp()
 // Baileys
+startServer();
 
 let file = require.resolve(__filename);
 fs.watchFile(file, () => {
