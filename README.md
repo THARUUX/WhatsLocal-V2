@@ -1,7 +1,7 @@
 # WhatsLocal-V2
 
 ## Requirements
-- [Node.js](https://nodejs.org/en/download/) v20 atau di atasnya
+- [Node.js](https://nodejs.org/en/download/) v20 or upper
 - [Git](https://git-scm.com/downloads)
 
 ## Install
